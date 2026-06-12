@@ -78,23 +78,25 @@ Tenancy length: ${Number(tenancyYears).toFixed(2)} years.
 
 These are PRIMARY 3D or main room photos. Compare move-in to move-out. Identify ONLY damage that is NEW at move-out (not present at move-in). Ignore lighting, angle, and staging differences.
 
-For each new issue, decide if it exceeds normal wear and tear for the tenancy length.
+For each new issue found, name the specific item damaged (e.g. "Carpet", "Interior paint", "Kitchen countertop", "Bathroom tub", "Refrigerator") and describe exactly what changed.
 
 Respond with JSON only:
 {
   "chargeTenant": true or false,
-  "summary": "One plain-English sentence explaining the Yes or No decision",
+  "summary": "One plain-English sentence",
   "issues": [
     {
+      "itemName": "Specific item name in plain English",
       "title": "short label",
-      "description": "what changed",
-      "itemKey": "interior_paint|carpet|general_wall|general_floor|general|etc",
+      "description": "Specific damage — what, where, size if visible",
+      "damage": "same as description",
+      "itemKey": "interior_paint|carpet|countertop_laminate|tub_shower|refrigerator|cabinet_finish|tile_flooring|etc",
       "chargeTenant": true or false
     }
   ]
 }
 
-Use chargeTenant=false when there is no new damage or when damage is normal wear only. Use chargeTenant=true only when tenant should be charged.`;
+List every distinct damaged item separately. Use chargeTenant=false for normal wear only. Use chargeTenant=true only when that specific item should be charged.`;
 }
 
 function normalizeVisionResponse(parsed) {
@@ -108,7 +110,9 @@ function normalizeVisionResponse(parsed) {
     reason: parsed.summary || "",
     issues: issues.map((issue) => ({
       title: issue.title || "Issue noted",
-      description: issue.description || "",
+      itemName: issue.itemName || issue.title || "",
+      description: issue.description || issue.damage || "",
+      damage: issue.damage || issue.description || "",
       itemKey: issue.itemKey || "general",
       chargeTenant: issue.chargeTenant === true,
     })),

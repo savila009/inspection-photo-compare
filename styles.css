@@ -594,6 +594,39 @@ body {
   font-size: 0.95rem;
 }
 
+.item-findings {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.item-findings li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.55rem 0;
+  border-bottom: 1px solid var(--border);
+}
+
+.item-findings li:last-child {
+  border-bottom: none;
+}
+
+.item-findings-detail {
+  flex: 1 1 100%;
+  font-size: 0.88rem;
+  color: var(--muted);
+  padding-left: 3.5rem;
+}
+
+@media (min-width: 640px) {
+  .item-findings-detail {
+    flex: 1 1 auto;
+    padding-left: 0;
+  }
+}
+
 .supportive-section {
   margin-top: 1rem;
   padding-top: 1rem;

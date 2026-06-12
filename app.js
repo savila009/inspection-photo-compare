@@ -1,9 +1,8 @@
 import {
   AREA_OPTIONS,
+  buildItemFindings,
   formatTenancySummary,
-  getChargeVerdict,
   getTenancyDuration,
-  inferItemKey,
 } from "./lib/wearAndTear.js";
 import { compareImages, fileToBase64, loadImageFromFile } from "./lib/imageCompare.js";
 import { analyzeWithVision, checkServerAvailable } from "./lib/visionAnalysis.js";
@@ -540,8 +539,7 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
   const pixelCompare = await compareImages(moveInImg, moveOutImg);
 
   const damageDetected = pixelCompare.changedAreaPercent >= 2.5;
-  let issueDescription = "";
-  let chargeable = false;
+  let visionIssues = null;
 
   if (useVision) {
     const [moveInBase64, moveOutBase64] = await Promise.all([
@@ -555,23 +553,26 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
       tenancyYears,
       apiKey,
     });
-
-    chargeable = vision.chargeTenant === true;
-    issueDescription =
-      vision.summary ||
-      vision.reason ||
-      (chargeable ? "New damage beyond normal wear." : "No chargeable damage found.");
-  } else {
-    const itemKey = inferItemKey("");
-    const verdict = getChargeVerdict(
-      damageDetected,
-      itemKey,
-      tenancyYears,
-      pixelCompare.changedAreaPercent
-    );
-    chargeable = verdict.chargeTenant;
-    issueDescription = verdict.reason;
+    visionIssues = vision.issues || [];
   }
+
+  const items = buildItemFindings(
+    visionIssues || [],
+    pair.area,
+    tenancyYears,
+    damageDetected,
+    pixelCompare.changedAreaPercent,
+    useVision
+  );
+
+  const chargeable = items.some((item) => item.chargeTenant);
+  const damagedItemLabels = items
+    .filter((item) => item.chargeTenant)
+    .map((item) => item.itemLabel)
+    .join(", ");
+  const reason = chargeable
+    ? `Damaged item(s): ${damagedItemLabels}.`
+    : items[0]?.reason || "No chargeable damage.";
 
   return {
     area: pair.area,
@@ -584,9 +585,11 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
       pair.moveOut.photoRole === PHOTO_ROLE.PRIMARY,
     supportiveMoveIn: pair.supportiveMoveIn,
     supportiveMoveOut: pair.supportiveMoveOut,
+    items,
     chargeable,
     answer: chargeable ? "Yes" : "No",
-    reason: issueDescription,
+    reason,
+    damagedItems: damagedItemLabels || "None",
   };
 }
 
@@ -622,12 +625,13 @@ function renderResults(results, duration) {
         <thead>
           <tr>
             <th scope="col">Area</th>
+            <th scope="col">Item</th>
             <th scope="col">Charge tenant?</th>
-            <th scope="col">Why</th>
+            <th scope="col">What changed</th>
           </tr>
         </thead>
         <tbody>
-          ${results.map((result) => renderVerdictRow(result)).join("")}
+          ${results.flatMap((result) => renderVerdictRows(result)).join("")}
         </tbody>
       </table>
     </div>
@@ -635,25 +639,33 @@ function renderResults(results, duration) {
   `;
 }
 
-function renderVerdictRow(result) {
+function renderVerdictRows(result) {
   if (result.error) {
-    return `
-      <tr>
+    return [
+      `<tr>
         <td>${escapeHtml(capitalizeArea(result.area))}</td>
+        <td>—</td>
         <td><span class="verdict verdict--review">—</span></td>
         <td>${escapeHtml(result.error)}</td>
-      </tr>
-    `;
+      </tr>`,
+    ];
   }
 
-  const verdictClass = result.chargeable ? "verdict--yes" : "verdict--no";
-  return `
-    <tr>
-      <td>${escapeHtml(capitalizeArea(result.area))}</td>
-      <td><span class="verdict ${verdictClass}">${result.answer}</span></td>
-      <td>${escapeHtml(result.reason)}</td>
-    </tr>
-  `;
+  return (result.items || []).map((item, index) => {
+    const verdictClass = item.chargeTenant ? "verdict--yes" : "verdict--no";
+    const areaCell =
+      index === 0
+        ? `<td rowspan="${result.items.length}">${escapeHtml(capitalizeArea(result.area))}</td>`
+        : "";
+    return `
+      <tr>
+        ${areaCell}
+        <td><strong>${escapeHtml(item.itemLabel)}</strong></td>
+        <td><span class="verdict ${verdictClass}">${item.answer}</span></td>
+        <td>${escapeHtml(item.description || item.reason)}</td>
+      </tr>
+    `;
+  });
 }
 
 function renderComparisonCard(result) {
@@ -682,7 +694,19 @@ function renderComparisonCard(result) {
         </div>
       </div>
       <div class="comparison-body">
-        <p class="verdict-reason">${escapeHtml(result.reason)}</p>
+        <ul class="item-findings">
+          ${(result.items || [])
+            .map(
+              (item) => `
+            <li>
+              <span class="verdict ${item.chargeTenant ? "verdict--yes" : "verdict--no"}">${item.answer}</span>
+              <strong>${escapeHtml(item.itemLabel)}</strong>
+              <span class="item-findings-detail">${escapeHtml(item.description || item.reason)}</span>
+            </li>
+          `
+            )
+            .join("")}
+        </ul>
         ${supportiveHtml}
       </div>
     </article>
