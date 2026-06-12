@@ -1,0 +1,174 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Move-In / Move-Out Inspection Compare</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script
+      src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"
+      crossorigin="anonymous"
+    ></script>
+  </head>
+  <body>
+    <main class="container">
+      <header class="page-header">
+        <h1>Move-in / move-out inspection compare</h1>
+        <p class="subtitle">
+          Upload move-in and move-out inspection report PDFs. The tool extracts
+          embedded photos and inspection dates from each report, tags images by area,
+          and compares side-by-side to flag damage that likely occurred during the
+          tenancy. Expected wear and tear is calculated from those dates against
+          standard item lifespans.
+        </p>
+        <p class="disclaimer" role="note">
+          This tool is a screening aid, not legal advice or a substitute for a
+          licensed inspection. Always review findings manually and consult qualified
+          counsel before withholding deposit or pursuing charges.
+        </p>
+      </header>
+
+      <section class="card">
+        <h2>1. Inspection dates</h2>
+        <p class="hint">
+          Dates auto-fill when you upload an inspection PDF below. You can still edit
+          them manually if the parser misses a label.
+        </p>
+        <div class="field-grid">
+          <div class="field">
+            <label for="moveInDate">Move-in inspection date</label>
+            <input id="moveInDate" type="date" required />
+            <p id="moveInDateSource" class="field-note" aria-live="polite"></p>
+          </div>
+          <div class="field">
+            <label for="moveOutDate">Move-out inspection date</label>
+            <input id="moveOutDate" type="date" required />
+            <p id="moveOutDateSource" class="field-note" aria-live="polite"></p>
+          </div>
+        </div>
+        <p id="tenancySummary" class="status muted" aria-live="polite">
+          Upload inspection PDFs or enter both dates to calculate tenancy length.
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>2. AI vision analysis (optional)</h2>
+        <p class="hint">
+          For automated damage descriptions, run the local server (<code>npm start</code>)
+          and enter your OpenAI API key. Without AI, the tool still compares images
+          visually and applies wear-and-tear math from your severity ratings.
+        </p>
+        <div class="field">
+          <label for="apiKey">OpenAI API key</label>
+          <input
+            id="apiKey"
+            type="password"
+            autocomplete="off"
+            placeholder="sk-… (stored in this browser tab only)"
+          />
+        </div>
+        <p id="serverStatus" class="status muted" aria-live="polite">
+          Checking for local analysis server…
+        </p>
+      </section>
+
+      <section class="card">
+        <h2>3. Upload inspection reports</h2>
+        <p class="hint">
+          Drop the full move-in or move-out inspection PDF for each side. Photos are
+          extracted from the report automatically — you do not upload images separately.
+          Area tags are inferred from room labels in the PDF text; adjust them below if needed.
+        </p>
+        <div class="upload-columns">
+          <div class="upload-panel">
+            <h3>Move-in inspection report</h3>
+            <div
+              class="dropzone"
+              id="moveInDropzone"
+              data-input-id="moveInFiles"
+              tabindex="0"
+              role="button"
+              aria-label="Upload move-in inspection PDF report"
+            >
+              <p>Drag &amp; drop move-in PDF here</p>
+              <small>or click to choose · PDF only</small>
+            </div>
+            <input
+              id="moveInFiles"
+              type="file"
+              accept=".pdf,application/pdf"
+            />
+            <p id="moveInUploadStatus" class="status muted" aria-live="polite"></p>
+            <div id="moveInGrid" class="photo-grid" aria-live="polite"></div>
+          </div>
+
+          <div class="upload-panel">
+            <h3>Move-out inspection report</h3>
+            <div
+              class="dropzone"
+              id="moveOutDropzone"
+              data-input-id="moveOutFiles"
+              tabindex="0"
+              role="button"
+              aria-label="Upload move-out inspection PDF report"
+            >
+              <p>Drag &amp; drop move-out PDF here</p>
+              <small>or click to choose · PDF only</small>
+            </div>
+            <input
+              id="moveOutFiles"
+              type="file"
+              accept=".pdf,application/pdf"
+            />
+            <p id="moveOutUploadStatus" class="status muted" aria-live="polite"></p>
+            <div id="moveOutGrid" class="photo-grid" aria-live="polite"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>4. Compare by area</h2>
+        <p class="hint">
+          Tag each photo with a room or area. Photos with matching tags are paired
+          for comparison. Add custom area names if needed.
+        </p>
+        <div class="toolbar">
+          <button type="button" id="analyzeBtn" class="btn-primary" disabled>
+            Analyze comparisons
+          </button>
+          <button type="button" id="clearBtn" class="btn-secondary">
+            Clear reports
+          </button>
+        </div>
+        <p id="analyzeStatus" class="status" aria-live="polite"></p>
+      </section>
+
+      <section class="card hidden" id="resultsCard">
+        <h2>5. Results</h2>
+        <div class="results-summary" id="resultsSummary"></div>
+        <div id="comparisonResults" class="comparison-results"></div>
+      </section>
+    </main>
+
+    <template id="photoCardTemplate">
+      <article class="photo-card">
+        <img class="photo-thumb" alt="" />
+        <div class="photo-meta">
+          <label class="sr-only">Area</label>
+          <select class="area-select"></select>
+          <input
+            type="text"
+            class="custom-area"
+            placeholder="Custom area name"
+            hidden
+          />
+          <button type="button" class="btn-icon remove-photo" title="Remove photo">
+            &times;
+          </button>
+        </div>
+      </article>
+    </template>
+
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
