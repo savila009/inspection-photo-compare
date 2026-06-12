@@ -76,41 +76,42 @@ function buildVisionPrompt(area, tenancyYears) {
 
 Tenancy length: ${Number(tenancyYears).toFixed(2)} years.
 
-Compare the move-in photo to the move-out photo. Identify ONLY damage or deterioration that appears NEW at move-out (not present at move-in). Ignore differences caused by lighting, camera angle, furniture, or staging.
+These are PRIMARY 3D or main room photos. Compare move-in to move-out. Identify ONLY damage that is NEW at move-out (not present at move-in). Ignore lighting, angle, and staging differences.
 
-For each new issue found, estimate:
-- title: short label
-- description: what changed and where in the frame
-- itemKey: one of interior_paint, carpet, vinyl_flooring, laminate_flooring, hardwood_flooring, tile_flooring, countertop_laminate, countertop_solid, cabinet_finish, interior_door, window_blinds, window_screens, refrigerator, range_oven, dishwasher, washer_dryer, bathroom_fixture, toilet, tub_shower, drywall, baseboard_trim, light_fixture, general_wall, general_floor, general
-- severity: number 0-100 indicating how significant the damage is relative to replacing/refinishing that item
-
-Do NOT list pre-existing move-in conditions. If nothing new is visible, return an empty findings array.
+For each new issue, decide if it exceeds normal wear and tear for the tenancy length.
 
 Respond with JSON only:
 {
-  "findings": [
+  "chargeTenant": true or false,
+  "summary": "One plain-English sentence explaining the Yes or No decision",
+  "issues": [
     {
-      "title": "...",
-      "description": "...",
-      "itemKey": "...",
-      "severity": 0
+      "title": "short label",
+      "description": "what changed",
+      "itemKey": "interior_paint|carpet|general_wall|general_floor|general|etc",
+      "chargeTenant": true or false
     }
-  ],
-  "summary": "one sentence overall assessment"
-}`;
+  ]
+}
+
+Use chargeTenant=false when there is no new damage or when damage is normal wear only. Use chargeTenant=true only when tenant should be charged.`;
 }
 
 function normalizeVisionResponse(parsed) {
-  const findings = Array.isArray(parsed.findings) ? parsed.findings : [];
+  const issues = Array.isArray(parsed.issues) ? parsed.issues : [];
+  const chargeTenant =
+    parsed.chargeTenant === true || issues.some((issue) => issue.chargeTenant === true);
+
   return {
-    findings: findings.map((finding) => ({
-      title: finding.title || "Damage noted",
-      description: finding.description || "",
-      itemKey: finding.itemKey || "general",
-      severity: clampNumber(finding.severity, 0, 100, 40),
-      rationale: finding.rationale || parsed.summary || "",
+    chargeTenant,
+    summary: parsed.summary || (chargeTenant ? "New damage beyond normal wear." : "No chargeable damage."),
+    reason: parsed.summary || "",
+    issues: issues.map((issue) => ({
+      title: issue.title || "Issue noted",
+      description: issue.description || "",
+      itemKey: issue.itemKey || "general",
+      chargeTenant: issue.chargeTenant === true,
     })),
-    summary: parsed.summary || "",
   };
 }
 

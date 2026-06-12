@@ -1,7 +1,7 @@
 import {
   AREA_OPTIONS,
-  classifyDamage,
   formatTenancySummary,
+  getChargeVerdict,
   getTenancyDuration,
   inferItemKey,
 } from "./lib/wearAndTear.js";
@@ -11,6 +11,7 @@ import {
   isPdfFile,
   parseInspectionPdf,
 } from "./lib/pdfParser.js";
+import { PHOTO_ROLE, roleLabel } from "./lib/photoClassifier.js";
 
 const state = {
   moveIn: [],
@@ -243,7 +244,7 @@ async function handleFiles(side, files) {
     }
 
     for (const photo of parsed.photos) {
-      addPhotoRecord(side, photo.file, photo.area);
+      addPhotoRecord(side, photo.file, photo.area, photo.photoRole);
     }
 
     if (parsed.date.iso) {
@@ -288,7 +289,7 @@ function applyParsedInspectionDate(side, dateResult, fileName) {
   sourceEl.className = "field-note field-note--warn";
 }
 
-function addPhotoRecord(side, file, area) {
+function addPhotoRecord(side, file, area, photoRole = PHOTO_ROLE.SUPPORTIVE) {
   const list = side === "moveIn" ? state.moveIn : state.moveOut;
   const grid = side === "moveIn" ? moveInGridEl : moveOutGridEl;
   const id = `photo-${++photoIdCounter}`;
@@ -299,6 +300,7 @@ function addPhotoRecord(side, file, area) {
     url,
     area,
     side,
+    photoRole,
   };
   list.push(photo);
   grid.appendChild(createPhotoCard(photo));
@@ -312,6 +314,11 @@ function createPhotoCard(photo) {
   const img = node.querySelector(".photo-thumb");
   img.src = photo.url;
   img.alt = photo.file.name;
+
+  const roleBadge = document.createElement("span");
+  roleBadge.className = `photo-role photo-role--${photo.photoRole || PHOTO_ROLE.SUPPORTIVE}`;
+  roleBadge.textContent = roleLabel(photo.photoRole);
+  node.querySelector(".photo-meta").prepend(roleBadge);
 
   const select = node.querySelector(".area-select");
   for (const option of AREA_OPTIONS) {
@@ -440,18 +447,35 @@ function buildAreaPairs() {
   for (const area of areas) {
     const moveInPhotos = moveInByArea.get(area) || [];
     const moveOutPhotos = moveOutByArea.get(area) || [];
-    if (moveInPhotos.length && moveOutPhotos.length) {
-      pairs.push({
-        area,
-        moveIn: moveInPhotos[0],
-        moveOut: moveOutPhotos[0],
-        extraMoveIn: moveInPhotos.slice(1),
-        extraMoveOut: moveOutPhotos.slice(1),
-      });
+    if (!moveInPhotos.length || !moveOutPhotos.length) {
+      continue;
     }
+
+    const moveInPrimary = pickComparisonPhoto(moveInPhotos);
+    const moveOutPrimary = pickComparisonPhoto(moveOutPhotos);
+    if (!moveInPrimary || !moveOutPrimary) {
+      continue;
+    }
+
+    pairs.push({
+      area,
+      moveIn: moveInPrimary,
+      moveOut: moveOutPrimary,
+      supportiveMoveIn: moveInPhotos.filter((p) => p.id !== moveInPrimary.id),
+      supportiveMoveOut: moveOutPhotos.filter((p) => p.id !== moveOutPrimary.id),
+    });
   }
 
   return pairs.sort((a, b) => a.area.localeCompare(b.area));
+}
+
+function pickComparisonPhoto(photos) {
+  const threeD = photos.filter((p) => p.photoRole === PHOTO_ROLE.PRIMARY);
+  if (threeD.length) {
+    return threeD[0];
+  }
+  const supportive = photos.filter((p) => p.photoRole === PHOTO_ROLE.SUPPORTIVE);
+  return supportive[0] || photos[0];
 }
 
 function groupByArea(photos) {
@@ -515,7 +539,10 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
   const moveOutImg = await loadImageFromFile(pair.moveOut.file);
   const pixelCompare = await compareImages(moveInImg, moveOutImg);
 
-  let visionFindings = [];
+  const damageDetected = pixelCompare.changedAreaPercent >= 2.5;
+  let issueDescription = "";
+  let chargeable = false;
+
   if (useVision) {
     const [moveInBase64, moveOutBase64] = await Promise.all([
       fileToBase64(pair.moveIn.file),
@@ -528,21 +555,23 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
       tenancyYears,
       apiKey,
     });
-    visionFindings = vision.findings || [];
+
+    chargeable = vision.chargeTenant === true;
+    issueDescription =
+      vision.summary ||
+      vision.reason ||
+      (chargeable ? "New damage beyond normal wear." : "No chargeable damage found.");
   } else {
-    visionFindings = buildHeuristicFindings(pixelCompare, pair.area);
+    const itemKey = inferItemKey("");
+    const verdict = getChargeVerdict(
+      damageDetected,
+      itemKey,
+      tenancyYears,
+      pixelCompare.changedAreaPercent
+    );
+    chargeable = verdict.chargeTenant;
+    issueDescription = verdict.reason;
   }
-
-  const classifiedFindings = visionFindings.map((finding) => {
-    const itemKey = finding.itemKey || inferItemKey(finding.description);
-    const severity = finding.severity ?? pixelCompare.severityScore;
-    const wearResult = classifyDamage(severity, itemKey, tenancyYears);
-    return { ...finding, itemKey, severity, wearResult };
-  });
-
-  const chargeableCount = classifiedFindings.filter((f) => f.wearResult.chargeable).length;
-  const overallBadge =
-    chargeableCount > 0 ? "damage" : classifiedFindings.length ? "wear" : "review";
 
   return {
     area: pair.area,
@@ -550,47 +579,27 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
     moveOutUrl: pair.moveOut.url,
     moveInName: pair.moveIn.file.name,
     moveOutName: pair.moveOut.file.name,
-    pixelCompare,
-    findings: classifiedFindings,
-    chargeableCount,
-    overallBadge,
-    extraNote:
-      pair.extraMoveIn.length || pair.extraMoveOut.length
-        ? `Additional unmatched photos in this area: ${pair.extraMoveIn.length} move-in, ${pair.extraMoveOut.length} move-out (only first pair compared).`
-        : null,
+    comparedWith3D:
+      pair.moveIn.photoRole === PHOTO_ROLE.PRIMARY &&
+      pair.moveOut.photoRole === PHOTO_ROLE.PRIMARY,
+    supportiveMoveIn: pair.supportiveMoveIn,
+    supportiveMoveOut: pair.supportiveMoveOut,
+    chargeable,
+    answer: chargeable ? "Yes" : "No",
+    reason: issueDescription,
   };
-}
-
-function buildHeuristicFindings(pixelCompare, area) {
-  if (pixelCompare.changedAreaPercent < 1.5) {
-    return [
-      {
-        title: "Minimal visible change",
-        description: `Pixel comparison shows ~${pixelCompare.changedAreaPercent.toFixed(1)}% changed area between move-in and move-out for ${area}.`,
-        severity: pixelCompare.severityScore,
-      },
-    ];
-  }
-
-  return [
-    {
-      title: "Visible change detected",
-      description: `Approximately ${pixelCompare.changedAreaPercent.toFixed(1)}% of the image differs from move-in. Review the heatmap and classify the affected surface (wall, floor, fixture, etc.).`,
-      severity: pixelCompare.severityScore,
-    },
-  ];
 }
 
 function renderResults(results, duration) {
   resultsCardEl.classList.remove("hidden");
 
-  const totalChargeable = results.reduce((sum, r) => sum + (r.chargeableCount || 0), 0);
-  const areasWithDamage = results.filter((r) => r.chargeableCount > 0).length;
+  const yesCount = results.filter((r) => r.chargeable).length;
+  const noCount = results.filter((r) => !r.error && !r.chargeable).length;
   const areasCompared = results.filter((r) => !r.error).length;
 
   resultsSummaryEl.innerHTML = `
     <div class="stat-box">
-      <span class="label">Areas compared</span>
+      <span class="label">Areas reviewed</span>
       <span class="value">${areasCompared}</span>
     </div>
     <div class="stat-box">
@@ -598,103 +607,113 @@ function renderResults(results, duration) {
       <span class="value" style="font-size:1rem">${Math.round(duration.months)} mo</span>
     </div>
     <div class="stat-box">
-      <span class="label">Chargeable findings</span>
-      <span class="value ${totalChargeable ? "danger" : "success"}">${totalChargeable}</span>
+      <span class="label">Charge tenant (Yes)</span>
+      <span class="value ${yesCount ? "danger" : "success"}">${yesCount}</span>
     </div>
     <div class="stat-box">
-      <span class="label">Areas w/ damage</span>
-      <span class="value ${areasWithDamage ? "danger" : "success"}">${areasWithDamage}</span>
+      <span class="label">Normal wear (No)</span>
+      <span class="value success">${noCount}</span>
     </div>
   `;
 
-  comparisonResultsEl.innerHTML = results
-    .map((result) => renderComparisonCard(result))
-    .join("");
+  comparisonResultsEl.innerHTML = `
+    <div class="verdict-table-wrap">
+      <table class="verdict-table">
+        <thead>
+          <tr>
+            <th scope="col">Area</th>
+            <th scope="col">Charge tenant?</th>
+            <th scope="col">Why</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${results.map((result) => renderVerdictRow(result)).join("")}
+        </tbody>
+      </table>
+    </div>
+    ${results.map((result) => renderComparisonCard(result)).join("")}
+  `;
+}
+
+function renderVerdictRow(result) {
+  if (result.error) {
+    return `
+      <tr>
+        <td>${escapeHtml(capitalizeArea(result.area))}</td>
+        <td><span class="verdict verdict--review">—</span></td>
+        <td>${escapeHtml(result.error)}</td>
+      </tr>
+    `;
+  }
+
+  const verdictClass = result.chargeable ? "verdict--yes" : "verdict--no";
+  return `
+    <tr>
+      <td>${escapeHtml(capitalizeArea(result.area))}</td>
+      <td><span class="verdict ${verdictClass}">${result.answer}</span></td>
+      <td>${escapeHtml(result.reason)}</td>
+    </tr>
+  `;
 }
 
 function renderComparisonCard(result) {
   if (result.error) {
-    return `
-      <article class="comparison-card">
-        <div class="comparison-header">
-          <h3>${escapeHtml(result.area)}</h3>
-          <span class="badge badge--review">Error</span>
-        </div>
-        <div class="comparison-body">
-          <p class="no-findings">${escapeHtml(result.error)}</p>
-        </div>
-      </article>
-    `;
+    return "";
   }
 
-  const badgeClass =
-    result.overallBadge === "damage"
-      ? "badge--damage"
-      : result.overallBadge === "wear"
-        ? "badge--wear"
-        : "badge--review";
-  const badgeLabel =
-    result.overallBadge === "damage"
-      ? "Possible tenant damage"
-      : result.overallBadge === "wear"
-        ? "Likely wear & tear"
-        : "Review manually";
-
-  const findingsHtml = result.findings.length
-    ? `<ul class="finding-list">${result.findings.map(renderFinding).join("")}</ul>`
-    : `<p class="no-findings">No significant differences detected.</p>`;
+  const supportiveHtml = renderSupportivePhotos(result);
 
   return `
     <article class="comparison-card">
       <div class="comparison-header">
         <h3>${escapeHtml(capitalizeArea(result.area))}</h3>
-        <span class="badge ${badgeClass}">${badgeLabel}</span>
+        <span class="verdict ${result.chargeable ? "verdict--yes" : "verdict--no"}">
+          Charge tenant: ${result.answer}
+        </span>
       </div>
-      <div class="comparison-images">
+      <div class="comparison-images comparison-images--two">
         <div class="image-panel">
           <img src="${result.moveInUrl}" alt="Move-in: ${escapeHtml(result.moveInName)}" />
-          <div class="caption">Move-in · ${escapeHtml(result.moveInName)}</div>
+          <div class="caption">Move-in ${result.comparedWith3D ? "3D" : "primary"} · ${escapeHtml(result.moveInName)}</div>
         </div>
         <div class="image-panel">
           <img src="${result.moveOutUrl}" alt="Move-out: ${escapeHtml(result.moveOutName)}" />
-          <div class="caption">Move-out · ${escapeHtml(result.moveOutName)}</div>
-        </div>
-        <div class="image-panel">
-          <img src="${result.pixelCompare.heatmapDataUrl}" alt="Difference heatmap" />
-          <div class="caption">Change heatmap · ${result.pixelCompare.changedAreaPercent.toFixed(1)}% changed</div>
+          <div class="caption">Move-out ${result.comparedWith3D ? "3D" : "primary"} · ${escapeHtml(result.moveOutName)}</div>
         </div>
       </div>
       <div class="comparison-body">
-        ${findingsHtml}
-        ${result.extraNote ? `<p class="hint">${escapeHtml(result.extraNote)}</p>` : ""}
+        <p class="verdict-reason">${escapeHtml(result.reason)}</p>
+        ${supportiveHtml}
       </div>
     </article>
   `;
 }
 
-function renderFinding(finding) {
-  const wear = finding.wearResult;
-  const badgeClass = wear.chargeable ? "badge--damage" : "badge--wear";
-  const badgeText = wear.chargeable ? "Chargeable" : "Wear & tear";
+function renderSupportivePhotos(result) {
+  const all = [
+    ...result.supportiveMoveIn.map((p) => ({ ...p, side: "Move-in" })),
+    ...result.supportiveMoveOut.map((p) => ({ ...p, side: "Move-out" })),
+  ];
+  if (!all.length) {
+    return "";
+  }
 
   return `
-    <li>
-      <div class="finding-title">${escapeHtml(finding.title || finding.description || "Finding")}</div>
-      <div class="finding-detail">${escapeHtml(finding.description || "")}</div>
-      ${finding.rationale ? `<div class="finding-detail">${escapeHtml(finding.rationale)}</div>` : ""}
-      <div class="finding-detail">${escapeHtml(wear.rationale)}</div>
-      <div class="finding-meta">
-        <span class="badge ${badgeClass}">${badgeText}</span>
-        <span>${escapeHtml(wear.itemLabel)} · useful life ~${wear.lifespanYears} yrs</span>
-        <span>Severity ${finding.severity.toFixed(0)}% · expected wear ${wear.expectedWearPercent.toFixed(0)}%</span>
+    <div class="supportive-section">
+      <p class="supportive-label">Supporting photos (reference only — not used for the Yes/No decision)</p>
+      <div class="supportive-grid">
+        ${all
+          .map(
+            (photo) => `
+          <figure class="supportive-thumb">
+            <img src="${photo.url}" alt="${escapeHtml(photo.file.name)}" />
+            <figcaption>${escapeHtml(photo.side)} · ${escapeHtml(roleLabel(photo.photoRole))}</figcaption>
+          </figure>
+        `
+          )
+          .join("")}
       </div>
-      <div class="wear-bar" title="Expected wear vs observed severity">
-        <div class="wear-bar-fill wear-bar-fill--expected" style="width:${wear.expectedWearPercent}%"></div>
-      </div>
-      <div class="wear-bar">
-        <div class="wear-bar-fill wear-bar-fill--observed" style="width:${Math.min(finding.severity, 100)}%"></div>
-      </div>
-    </li>
+    </div>
   `;
 }
 

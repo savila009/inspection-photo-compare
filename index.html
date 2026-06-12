@@ -75,9 +75,9 @@
       <section class="card">
         <h2>3. Upload inspection reports</h2>
         <p class="hint">
-          Drop the full move-in or move-out inspection PDF for each side. Photos are
-          extracted from the report automatically — you do not upload images separately.
-          Area tags are inferred from room labels in the PDF text; adjust them below if needed.
+          Drop the full move-in or move-out inspection PDF for each side. Text-only pages
+          are skipped. 3D room photos are compared side-by-side; other photos are reference only.
+          Results are simple Yes or No — charge the tenant, or normal wear only.
         </p>
         <div class="upload-columns">
           <div class="upload-panel">
@@ -129,8 +129,7 @@
       <section class="card">
         <h2>4. Compare by area</h2>
         <p class="hint">
-          Tag each photo with a room or area. Photos with matching tags are paired
-          for comparison. Add custom area names if needed.
+          Tag each photo with a room or area. Matching areas are compared using 3D photos first.
         </p>
         <div class="toolbar">
           <button type="button" id="analyzeBtn" class="btn-primary" disabled>
