@@ -10,7 +10,7 @@ Local web app for comparing tenant inspection photos by area, detecting post-mov
 - Tag each photo by room/area (kitchen, bathroom, bedrooms, etc.)
 - Side-by-side comparison with a **change heatmap** for each matched area
 - **Wear-and-tear engine** uses move-in vs move-out dates and item lifespans (paint, carpet, flooring, fixtures, appliances) to classify findings as chargeable damage or normal wear
-- Optional **AI vision analysis** (OpenAI) for detailed damage descriptions when running the local server
+- Optional **AI vision analysis** (Claude or OpenAI) for detailed damage descriptions when running the local server
 
 ## Quick start
 
@@ -28,14 +28,14 @@ For pixel comparison only (no AI), you can also serve static files:
 python3 -m http.server 8080
 ```
 
-AI vision requires `npm start` so the OpenAI API key stays on your machine via the local proxy.
+AI vision requires `npm start` so your API key stays on your machine via the local proxy.
 
 ## How to use
 
 1. Drag the **move-in inspection PDF** into the left panel and the **move-out inspection PDF** into the right panel.
 2. The tool extracts **embedded photos** and the **inspection date** from each report.
 3. Review auto-filled dates and adjust **area tags** on extracted photos if needed.
-4. Optionally enter your **OpenAI API key** for AI-generated damage descriptions.
+4. Optionally choose **Claude** or **OpenAI** and enter your API key for AI-generated item findings.
 5. Click **Analyze comparisons** to review results per area.
 
 If a PDF has no extractable embedded images, the tool falls back to rendering each page (common with flat scanned reports).
@@ -66,7 +66,7 @@ Default useful-life values (years) are in `lib/wearAndTear.js` — adjust them t
 | `lib/pdfParser.js` | PDF text extraction, date parsing, page rendering |
 | `lib/imageCompare.js` | Canvas pixel diff and heatmap |
 | `lib/visionAnalysis.js` | Client calls to local vision proxy |
-| `server.js` | Static file server + OpenAI proxy |
+| `server.js` | Static file server + Claude/OpenAI vision proxy |
 
 ## Important note
 

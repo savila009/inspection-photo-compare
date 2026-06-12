@@ -26,6 +26,7 @@ const moveInDateSourceEl = document.getElementById("moveInDateSource");
 const moveOutDateSourceEl = document.getElementById("moveOutDateSource");
 const tenancySummaryEl = document.getElementById("tenancySummary");
 const apiKeyEl = document.getElementById("apiKey");
+const visionProviderEl = document.getElementById("visionProvider");
 const serverStatusEl = document.getElementById("serverStatus");
 const moveInDropzone = document.getElementById("moveInDropzone");
 const moveOutDropzone = document.getElementById("moveOutDropzone");
@@ -512,12 +513,13 @@ async function runAnalysis() {
   analyzeStatusEl.className = "status muted";
 
   const apiKey = apiKeyEl.value.trim();
+  const provider = visionProviderEl?.value || "claude";
   const useVision = state.serverAvailable && apiKey.length > 0;
   const results = [];
 
   for (const pair of pairs) {
     try {
-      const result = await analyzePair(pair, duration.years, apiKey, useVision);
+      const result = await analyzePair(pair, duration.years, apiKey, provider, useVision);
       results.push(result);
     } catch (err) {
       results.push({
@@ -533,7 +535,7 @@ async function runAnalysis() {
   analyzeStatusEl.className = "status status--ok";
 }
 
-async function analyzePair(pair, tenancyYears, apiKey, useVision) {
+async function analyzePair(pair, tenancyYears, apiKey, provider, useVision) {
   const moveInImg = await loadImageFromFile(pair.moveIn.file);
   const moveOutImg = await loadImageFromFile(pair.moveOut.file);
   const pixelCompare = await compareImages(moveInImg, moveOutImg);
@@ -552,6 +554,7 @@ async function analyzePair(pair, tenancyYears, apiKey, useVision) {
       area: pair.area,
       tenancyYears,
       apiKey,
+      provider,
     });
     visionIssues = vision.issues || [];
   }

@@ -55,17 +55,26 @@
         <h2>2. AI vision analysis (optional)</h2>
         <p class="hint">
           For automated damage descriptions, run the local server (<code>npm start</code>)
-          and enter your OpenAI API key. Without AI, the tool still compares images
-          visually and applies wear-and-tear math from your severity ratings.
+          and enter a Claude or OpenAI API key. Without AI, the tool still compares images
+          visually and applies wear-and-tear rules from tenancy length.
         </p>
-        <div class="field">
-          <label for="apiKey">OpenAI API key</label>
-          <input
-            id="apiKey"
-            type="password"
-            autocomplete="off"
-            placeholder="sk-… (stored in this browser tab only)"
-          />
+        <div class="field-grid">
+          <div class="field">
+            <label for="visionProvider">AI provider</label>
+            <select id="visionProvider">
+              <option value="claude" selected>Claude (Anthropic)</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </div>
+          <div class="field">
+            <label for="apiKey">API key</label>
+            <input
+              id="apiKey"
+              type="password"
+              autocomplete="off"
+              placeholder="sk-ant-… or sk-… (this tab only)"
+            />
+          </div>
         </div>
         <p id="serverStatus" class="status muted" aria-live="polite">
           Checking for local analysis server…
