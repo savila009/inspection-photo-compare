@@ -4,8 +4,16 @@ import {
   formatTenancySummary,
   getTenancyDuration,
 } from "./lib/wearAndTear.js";
-import { compareImages, fileToBase64, loadImageFromFile } from "./lib/imageCompare.js";
-import { analyzeWithVision, checkServerAvailable } from "./lib/visionAnalysis.js";
+import {
+  applyAiSettingsToUi,
+  describeKeySource,
+  loadAiSettings,
+  readAiSettingsFromUi,
+  saveAiSettings,
+  visionIsReady,
+} from "./lib/aiSettings.js";
+import { buildComparisonEvidence, fileToBase64, loadImageFromFile } from "./lib/imageCompare.js";
+import { analyzeWithVision, fetchServerConfig } from "./lib/visionAnalysis.js";
 import {
   isPdfFile,
   parseInspectionPdf,
@@ -16,6 +24,7 @@ const state = {
   moveIn: [],
   moveOut: [],
   serverAvailable: false,
+  serverConfig: null,
 };
 
 let photoIdCounter = 0;
@@ -27,6 +36,8 @@ const moveOutDateSourceEl = document.getElementById("moveOutDateSource");
 const tenancySummaryEl = document.getElementById("tenancySummary");
 const apiKeyEl = document.getElementById("apiKey");
 const visionProviderEl = document.getElementById("visionProvider");
+const rememberApiKeyEl = document.getElementById("rememberApiKey");
+const apiKeySourceEl = document.getElementById("apiKeySource");
 const serverStatusEl = document.getElementById("serverStatus");
 const moveInDropzone = document.getElementById("moveInDropzone");
 const moveOutDropzone = document.getElementById("moveOutDropzone");
@@ -72,19 +83,60 @@ function init() {
   analyzeBtn.addEventListener("click", runAnalysis);
   clearBtn.addEventListener("click", clearAll);
 
-  checkServerAvailable().then((available) => {
-    state.serverAvailable = available;
-    if (available) {
-      serverStatusEl.textContent = "Local analysis server is running. AI vision is available.";
-      serverStatusEl.className = "status status--ok";
-    } else {
-      serverStatusEl.textContent =
-        "Local server not detected. Run npm start for AI descriptions; pixel comparison still works.";
-      serverStatusEl.className = "status muted";
-    }
+  const savedSettings = loadAiSettings();
+  applyAiSettingsToUi(savedSettings, apiKeyEl, visionProviderEl, rememberApiKeyEl);
+  setupAiSettingsPersistence();
+  updateVisionStatus();
+
+  fetchServerConfig().then((config) => {
+    state.serverAvailable = Boolean(config?.ok);
+    state.serverConfig = config;
+    updateVisionStatus();
   });
 
   updateAnalyzeButton();
+}
+
+function setupAiSettingsPersistence() {
+  const persist = () => {
+    const settings = readAiSettingsFromUi(apiKeyEl, visionProviderEl, rememberApiKeyEl);
+    saveAiSettings(settings);
+    updateVisionStatus();
+  };
+
+  apiKeyEl?.addEventListener("change", persist);
+  apiKeyEl?.addEventListener("blur", persist);
+  visionProviderEl?.addEventListener("change", persist);
+  rememberApiKeyEl?.addEventListener("change", persist);
+}
+
+function updateVisionStatus() {
+  const provider = visionProviderEl?.value || "claude";
+  const clientKey = apiKeyEl?.value?.trim() || "";
+  const ready = visionIsReady(state.serverAvailable, state.serverConfig, provider, clientKey);
+
+  if (apiKeySourceEl) {
+    apiKeySourceEl.textContent = describeKeySource(state.serverConfig, provider, clientKey);
+    apiKeySourceEl.className = ready ? "field-note field-note--ok" : "field-note field-note--warn";
+  }
+
+  if (!state.serverAvailable) {
+    serverStatusEl.textContent =
+      "Local server not detected. Run npm start — set ANTHROPIC_API_KEY in .env for a permanent key.";
+    serverStatusEl.className = "status status--error";
+    return;
+  }
+
+  if (ready) {
+    serverStatusEl.textContent =
+      "AI vision ready. Results use 3D photo comparison — not pixel diff — so angle differences are ignored.";
+    serverStatusEl.className = "status status--ok";
+    return;
+  }
+
+  serverStatusEl.textContent =
+    "Add ANTHROPIC_API_KEY to .env (recommended) or enter an API key below and check Remember.";
+  serverStatusEl.className = "status status--warn";
 }
 
 function preventBrowserFileDrop() {
@@ -512,14 +564,26 @@ async function runAnalysis() {
   analyzeStatusEl.textContent = `Analyzing ${pairs.length} area comparison${pairs.length === 1 ? "" : "s"}…`;
   analyzeStatusEl.className = "status muted";
 
-  const apiKey = apiKeyEl.value.trim();
-  const provider = visionProviderEl?.value || "claude";
-  const useVision = state.serverAvailable && apiKey.length > 0;
+  const settings = readAiSettingsFromUi(apiKeyEl, visionProviderEl, rememberApiKeyEl);
+  saveAiSettings(settings);
+
+  const provider = settings.provider;
+  const apiKey = settings.apiKey;
+  const useVision = visionIsReady(state.serverAvailable, state.serverConfig, provider, apiKey);
+
+  if (!useVision) {
+    analyzeBtn.disabled = false;
+    analyzeStatusEl.textContent =
+      "AI vision required. Run npm start and set ANTHROPIC_API_KEY in .env, or enter and save an API key.";
+    analyzeStatusEl.className = "status status--error";
+    return;
+  }
+
   const results = [];
 
   for (const pair of pairs) {
     try {
-      const result = await analyzePair(pair, duration.years, apiKey, provider, useVision);
+      const result = await analyzePair(pair, duration.years, apiKey, provider);
       results.push(result);
     } catch (err) {
       results.push({
@@ -535,38 +599,25 @@ async function runAnalysis() {
   analyzeStatusEl.className = "status status--ok";
 }
 
-async function analyzePair(pair, tenancyYears, apiKey, provider, useVision) {
-  const moveInImg = await loadImageFromFile(pair.moveIn.file);
-  const moveOutImg = await loadImageFromFile(pair.moveOut.file);
-  const pixelCompare = await compareImages(moveInImg, moveOutImg);
+async function analyzePair(pair, tenancyYears, apiKey, provider) {
+  const [moveInBase64, moveOutBase64, moveInImg, moveOutImg] = await Promise.all([
+    fileToBase64(pair.moveIn.file),
+    fileToBase64(pair.moveOut.file),
+    loadImageFromFile(pair.moveIn.file),
+    loadImageFromFile(pair.moveOut.file),
+  ]);
 
-  const damageDetected = pixelCompare.changedAreaPercent >= 2.5;
-  let visionIssues = null;
-
-  if (useVision) {
-    const [moveInBase64, moveOutBase64] = await Promise.all([
-      fileToBase64(pair.moveIn.file),
-      fileToBase64(pair.moveOut.file),
-    ]);
-    const vision = await analyzeWithVision({
-      moveInBase64,
-      moveOutBase64,
-      area: pair.area,
-      tenancyYears,
-      apiKey,
-      provider,
-    });
-    visionIssues = vision.issues || [];
-  }
-
-  const items = buildItemFindings(
-    visionIssues || [],
-    pair.area,
+  const vision = await analyzeWithVision({
+    moveInBase64,
+    moveOutBase64,
+    area: pair.area,
     tenancyYears,
-    damageDetected,
-    pixelCompare.changedAreaPercent,
-    useVision
-  );
+    apiKey,
+    provider,
+  });
+  const visionIssues = vision.issues || [];
+
+  const items = buildItemFindings(visionIssues, pair.area, tenancyYears, false, 0, true);
 
   const chargeable = items.some((item) => item.chargeTenant);
   const damagedItemLabels = items
@@ -576,6 +627,15 @@ async function analyzePair(pair, tenancyYears, apiKey, provider, useVision) {
   const reason = chargeable
     ? `Damaged item(s): ${damagedItemLabels}.`
     : items[0]?.reason || "No chargeable damage.";
+
+  const highlightBoxes = items
+    .filter((item) => item.chargeTenant && item.highlightBox)
+    .map((item) => item.highlightBox);
+
+  let evidence = null;
+  if (chargeable) {
+    evidence = await buildComparisonEvidence(moveInImg, moveOutImg, highlightBoxes);
+  }
 
   return {
     area: pair.area,
@@ -593,6 +653,8 @@ async function analyzePair(pair, tenancyYears, apiKey, provider, useVision) {
     answer: chargeable ? "Yes" : "No",
     reason,
     damagedItems: damagedItemLabels || "None",
+    analysisSource: "ai",
+    evidence,
   };
 }
 
@@ -686,6 +748,11 @@ function renderComparisonCard(result) {
           Charge tenant: ${result.answer}
         </span>
       </div>
+      ${
+        result.comparedWith3D
+          ? ""
+          : `<p class="field-note field-note--warn">No 3D photo pair for this area — using best available photos. Tag 3D images for best results.</p>`
+      }
       <div class="comparison-images comparison-images--two">
         <div class="image-panel">
           <img src="${result.moveInUrl}" alt="Move-in: ${escapeHtml(result.moveInName)}" />
@@ -710,10 +777,71 @@ function renderComparisonCard(result) {
             )
             .join("")}
         </ul>
+        ${renderChargeEvidence(result)}
         ${supportiveHtml}
       </div>
     </article>
   `;
+}
+
+function renderChargeEvidence(result) {
+  if (!result.chargeable || !result.evidence) {
+    return "";
+  }
+
+  const slug = areaSlug(result.area);
+  const note = result.evidence.hasHighlight
+    ? "AI marked the area of concern on the move-out photo (red box). These are the exact 3D comparison photos used for the charge decision."
+    : "Side-by-side copies of the 3D comparison photos used for this AI charge decision.";
+
+  const heatmapPanel = result.evidence.heatmapDataUrl
+    ? `
+        <div class="image-panel">
+          <img src="${result.evidence.heatmapDataUrl}" alt="Change heatmap for ${escapeHtml(result.area)}" />
+          <div class="caption">Change heatmap</div>
+        </div>
+      `
+    : "";
+
+  const heatmapDownload = result.evidence.heatmapDataUrl
+    ? `<a class="btn-secondary evidence-download" href="${result.evidence.heatmapDataUrl}" download="${slug}-heatmap.png">Download heatmap</a>`
+    : "";
+
+  return `
+    <div class="evidence-section">
+      <div class="evidence-header">
+        <p class="evidence-title">Charge evidence</p>
+        <p class="evidence-note">${escapeHtml(note)}</p>
+      </div>
+      <div class="comparison-images comparison-images--evidence${result.evidence.heatmapDataUrl ? "" : " comparison-images--evidence-two"}">
+        <div class="image-panel">
+          <img src="${result.evidence.moveInHighlightedUrl}" alt="Move-in evidence for ${escapeHtml(result.area)}" />
+          <div class="caption">Move-in · comparison photo</div>
+        </div>
+        <div class="image-panel">
+          <img src="${result.evidence.moveOutHighlightedUrl}" alt="Move-out evidence for ${escapeHtml(result.area)}" />
+          <div class="caption">Move-out · AI highlight</div>
+        </div>
+        ${heatmapPanel}
+      </div>
+      <div class="evidence-actions">
+        <a class="btn-secondary evidence-download" href="${result.evidence.combinedUrl}" download="${slug}-comparison.jpg">Download side-by-side</a>
+        <a class="btn-secondary evidence-download" href="${result.evidence.moveInHighlightedUrl}" download="${slug}-move-in-evidence.jpg">Download move-in</a>
+        <a class="btn-secondary evidence-download" href="${result.evidence.moveOutHighlightedUrl}" download="${slug}-move-out-evidence.jpg">Download move-out</a>
+        ${heatmapDownload}
+      </div>
+    </div>
+  `;
+}
+
+function areaSlug(area) {
+  return (
+    String(area || "area")
+      .trim()
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "-")
+      .replace(/^-|-$/g, "") || "area"
+  );
 }
 
 function renderSupportivePhotos(result) {

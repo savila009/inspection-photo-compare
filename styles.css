@@ -541,6 +541,58 @@ body {
   grid-template-columns: repeat(2, 1fr);
 }
 
+.comparison-images--evidence {
+  grid-template-columns: repeat(3, 1fr);
+}
+
+.comparison-images--evidence-two {
+  grid-template-columns: repeat(2, 1fr);
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.evidence-section {
+  margin-top: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+
+.evidence-header {
+  margin-bottom: 0.75rem;
+}
+
+.evidence-title {
+  margin: 0 0 0.25rem;
+  font-weight: 700;
+  font-size: 0.95rem;
+}
+
+.evidence-note {
+  margin: 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+
+.evidence-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0.75rem;
+}
+
+.evidence-download {
+  display: inline-block;
+  text-decoration: none;
+  font-size: 0.82rem;
+  padding: 0.45rem 0.75rem;
+}
+
 .verdict-table-wrap {
   overflow-x: auto;
   margin-bottom: 1.5rem;

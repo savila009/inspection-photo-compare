@@ -52,11 +52,13 @@
       </section>
 
       <section class="card">
-        <h2>2. AI vision analysis (optional)</h2>
+        <h2>2. AI vision analysis</h2>
         <p class="hint">
-          For automated damage descriptions, run the local server (<code>npm start</code>)
-          and enter a Claude or OpenAI API key. Without AI, the tool still compares images
-          visually and applies wear-and-tear rules from tenancy length.
+          Run the local server (<code>npm start</code>). For a permanent key, copy
+          <code>.env.example</code> to <code>.env</code> and set
+          <code>ANTHROPIC_API_KEY</code> (or <code>OPENAI_API_KEY</code>). You won't need to
+          re-enter it each visit. Charge decisions use AI on 3D room photos — not pixel diff —
+          so different camera angles won't cause false positives.
         </p>
         <div class="field-grid">
           <div class="field">
@@ -67,15 +69,22 @@
             </select>
           </div>
           <div class="field">
-            <label for="apiKey">API key</label>
+            <label for="apiKey">API key override (optional)</label>
             <input
               id="apiKey"
               type="password"
               autocomplete="off"
-              placeholder="sk-ant-… or sk-… (this tab only)"
+              placeholder="Only if not set in .env"
             />
           </div>
         </div>
+        <div class="field">
+          <label class="checkbox-label">
+            <input id="rememberApiKey" type="checkbox" checked />
+            Remember API key in this browser
+          </label>
+        </div>
+        <p id="apiKeySource" class="field-note" aria-live="polite"></p>
         <p id="serverStatus" class="status muted" aria-live="polite">
           Checking for local analysis server…
         </p>
@@ -87,7 +96,7 @@
           Drop the full move-in or move-out inspection PDF for each side. Text-only pages
           are skipped. 3D room photos are compared side-by-side; other photos are reference only.
           Results list each damaged item (carpet, paint, countertop, etc.) with a Yes or No
-          charge decision. Enable AI vision for the most specific item names.
+          charge decision from AI vision on the 3D comparison photos.
         </p>
         <div class="upload-columns">
           <div class="upload-panel">
